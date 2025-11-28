@@ -3,103 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQ-2 Gas Monitor (Web BLE)</title>
+    <title>Multi-Gas Monitor (Web BLE)</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Boxicons (bxs- for solid icons) -->
+    <!-- Load Boxicons -->
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #1a1a2e; /* Dark background for modern look */
+            background-color: #1a1a2e;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
         }
-        .monitor-card {
-            max-width: 520px;
+        .monitor-container {
+            max-width: 1200px;
             width: 95%;
-            background: #232946; /* Slightly lighter dark card */
+            background: #232946;
             color: #b8c1ec;
             padding: 2.5rem;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
             border: 1px solid #4a5482;
         }
-        /* Custom Button Style (uiverse.io-inspired glow/lift) */
+        .sensor-card {
+            background: #2d3250;
+            transition: all 0.5s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            border: 2px solid transparent;
+        }
+        .card-value {
+            font-size: 3rem;
+            font-weight: 700;
+        }
+        /* Custom Button Style */
         .connect-button {
             transition: all 0.3s ease;
-            box-shadow: 0 4px #0056b3; /* Default shadow */
+            box-shadow: 0 4px #0056b3;
             transform: translateY(0);
         }
         .connect-button:active {
             box-shadow: 0 2px #0056b3;
             transform: translateY(2px);
         }
-        .btn-disconnected {
-            background-color: #3f55a1;
-            box-shadow: 0 4px #2c3a72;
-        }
-        .btn-disconnected:hover {
-            background-color: #4a63b8;
-        }
-        .btn-connected {
-            background-color: #27a46c;
-            box-shadow: 0 4px #1a774c;
-        }
-        .btn-connected:hover {
-            background-color: #30c082;
-        }
+        .btn-disconnected { background-color: #3f55a1; box-shadow: 0 4px #2c3a72; }
+        .btn-disconnected:hover { background-color: #4a63b8; }
+        .btn-connected { background-color: #27a46c; box-shadow: 0 4px #1a774c; }
+        .btn-connected:hover { background-color: #30c082; }
 
         /* Alarm Pulse Effect */
         .pulse-red-glow {
-            animation: pulse-red-glow-anim 1s infinite cubic-bezier(0.5, 0, 0.5, 1);
+            animation: pulse-red-glow-anim 1s infinite alternate;
             border-color: #e53e3e !important;
         }
         @keyframes pulse-red-glow-anim {
-            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
-        }
-
-        .status-box {
-            min-height: 150px;
-        }
-        .gas-reading {
-            letter-spacing: 0.1em;
+            from { box-shadow: 0 0 10px rgba(220, 38, 38, 0.8); }
+            to { box-shadow: 0 0 25px rgba(220, 38, 38, 0.4); }
         }
     </style>
 </head>
 <body>
 
-    <div id="app" class="monitor-card rounded-2xl">
-        <h1 class="text-3xl font-extrabold text-white mb-2 text-center">GAS LEAK MONITOR</h1>
-        <p class="text-sm text-center text-gray-400 mb-8">ESP32 & MQ-2 Sensor via Web BLE</p>
+    <div id="app" class="monitor-container rounded-2xl">
+        <h1 class="text-3xl font-extrabold text-white mb-2 text-center">MULTI-GAS MONITORING (Web BLE)</h1>
+        <p id="global-status" class="text-sm text-center text-gray-400 mb-8 flex justify-center items-center">
+            <i class='bx bx-bluetooth mr-2 text-xl text-blue-400'></i> Awaiting Bluetooth Connection...
+        </p>
         
-        <!-- Status Indicator / Reading Area -->
-        <div id="status-display" class="status-box p-8 text-center rounded-xl mb-8 transition-all duration-500 bg-gray-700/30 border-4 border-transparent flex flex-col justify-center items-center">
+        <!-- Sensor Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             
-            <i id="status-icon" class='bx bx-bluetooth text-5xl text-blue-400 mb-3 transition-colors'></i>
-            
-            <p id="gas-value" class="text-5xl font-extrabold text-white gas-reading">---</p>
-            <p class="text-xs font-semibold uppercase mt-1 text-gray-400">Raw Sensor Reading</p>
+            <!-- MQ-2 CARD (Smoke/LPG) -->
+            <div id="card-mq2" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
+                <i class='bx bxs-flame text-5xl text-yellow-500 mb-3'></i>
+                <div class="text-xs font-semibold uppercase text-gray-400">MQ-2 (Smoke/LPG)</div>
+                <div id="val-mq2" class="card-value text-white">---</div>
+                <div id="status-mq2" class="text-sm font-bold text-green-400">SAFE</div>
+            </div>
 
-            <div class="mt-4">
-                <p id="status-message" class="text-xl font-bold text-blue-400">Awaiting Connection...</p>
+            <!-- MQ-7 CARD (Carbon Monoxide) -->
+            <div id="card-mq7" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
+                <i class='bx bxs-cloud text-5xl text-gray-400 mb-3'></i>
+                <div class="text-xs font-semibold uppercase text-gray-400">MQ-7 (CO)</div>
+                <div id="val-mq7" class="card-value text-white">---</div>
+                <div id="status-mq7" class="text-sm font-bold text-green-400">SAFE</div>
             </div>
-        </div>
 
-        <!-- Connection Details -->
-        <div class="bg-gray-700/50 p-4 rounded-lg mb-6 text-sm">
-            <div class="flex justify-between items-center py-1 border-b border-gray-600">
-                <span class="font-medium text-gray-400 flex items-center"><i class='bx bxs-server mr-2 text-lg'></i>Device Name:</span>
-                <span class="font-semibold text-white">{{ DEVICE_NAME }}</span>
+            <!-- MQ-135 CARD (Air Quality/CO2) -->
+            <div id="card-mq135" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
+                <i class='bx bxs-tree-alt text-5xl text-blue-400 mb-3'></i>
+                <div class="text-xs font-semibold uppercase text-gray-400">MQ-135 (Air Quality)</div>
+                <div id="val-mq135" class="card-value text-white">---</div>
+                <div id="status-mq135" class="text-sm font-bold text-green-400">SAFE</div>
             </div>
-            <div class="flex justify-between items-center py-1">
-                <span class="font-medium text-gray-400 flex items-center"><i class='bx bxs-bell-ring mr-2 text-lg'></i>Alarm Threshold:</span>
-                <span class="font-bold text-red-400">{{ GAS_THRESHOLD }} (ADC)</span>
-            </div>
+
         </div>
 
         <!-- Connection Button -->
@@ -120,17 +118,19 @@
         // --- Configuration Constants (Must match ESP32 code) ---
         const SERVICE_UUID = '0d783b9c-54a7-47b7-8798-e4b2d354b38d';
         const CHARACTERISTIC_UUID = '1a90c5be-141d-4034-8c88-662541a79f17';
-        const GAS_THRESHOLD = 1000;
-        const DEVICE_NAME = 'MQ2_Gas_Sensor'; 
+        const DEVICE_NAME = 'MQ2_Gas_Sensor';
+
+        // THRESHOLDS must match the ESP32 setup!
+        const THRESHOLDS = {
+            'MQ2': 1800,
+            'MQ7': 1500,
+            'MQ135': 2000
+        };
         
         // --- DOM Elements ---
-        const appDiv = document.getElementById('app');
         const connectButton = document.getElementById('connect-button');
-        const statusDisplay = document.getElementById('status-display');
-        const statusMessage = document.getElementById('status-message');
-        const statusIcon = document.getElementById('status-icon');
-        const gasValueDisplay = document.getElementById('gas-value');
         const logBox = document.getElementById('log-box');
+        const globalStatus = document.getElementById('global-status');
 
         // --- Global State ---
         let gasCharacteristic = null;
@@ -146,98 +146,119 @@
             if (logBox.children.length > 20) {
                 logBox.removeChild(logBox.lastChild);
             }
-            // Auto-scroll to top for newest logs
             logBox.scrollTop = 0;
         }
 
-        function updateUI(isConnected, gasValue = '---', isAlarm = false) {
-            // Update button state and color
+        function updateUIConnection(isConnected) {
             connectButton.textContent = isConnected ? 'Disconnect' : 'Connect to ESP32 Device';
             connectButton.classList.toggle('btn-disconnected', !isConnected);
             connectButton.classList.toggle('btn-connected', isConnected);
 
-            // Update main status display
-            gasValueDisplay.textContent = gasValue;
+            globalStatus.innerHTML = isConnected 
+                ? `<i class='bx bxs-check-circle mr-2 text-xl text-green-400'></i> Connected to ${DEVICE_NAME}`
+                : `<i class='bx bx-bluetooth mr-2 text-xl text-blue-400'></i> Awaiting Bluetooth Connection...`;
 
-            if (isConnected) {
-                // Clear initial status and reading display
-                statusDisplay.classList.remove('bg-gray-700/30');
+            if (!isConnected) {
+                // Reset all cards on disconnect
+                ['mq2', 'mq7', 'mq135'].forEach(sensor => {
+                    document.getElementById(`val-${sensor}`).textContent = '---';
+                    document.getElementById(`status-${sensor}`).textContent = 'OFFLINE';
+                    document.getElementById(`status-${sensor}`).className = 'text-sm font-bold text-gray-500';
+                    document.getElementById(`card-${sensor}`).classList.remove('pulse-red-glow', 'border-red-500', 'border-green-400');
+                    document.getElementById(`card-${sensor}`).classList.add('border-gray-600/50');
+                });
+            }
+        }
+        
+        /**
+         * Updates a single sensor card based on parsed data.
+         * @param {string} sensorCode - e.g., 'mq2'
+         * @param {number} value - Sensor reading
+         */
+        function updateCard(sensorCode, value) {
+            const threshold = THRESHOLDS[sensorCode.toUpperCase()];
+            const isAlarm = value > threshold;
 
-                if (isAlarm) {
-                    // ALARM STATE: Red, prominent glow, bell icon
-                    statusDisplay.classList.add('pulse-red-glow');
-                    statusDisplay.classList.remove('border-green-400');
-                    statusDisplay.classList.add('border-red-500', 'bg-red-900/40');
-                    statusMessage.textContent = 'GAS LEAK DETECTED!';
-                    statusMessage.classList.remove('text-green-400');
-                    statusMessage.classList.add('text-red-400');
-                    
-                    statusIcon.className = 'bx bxs-bell-ring text-red-400 text-6xl mb-3 transition-colors bx-tada'; // Boxicon bell ring with animation
-                    gasValueDisplay.classList.add('text-red-300');
+            const card = document.getElementById(`card-${sensorCode}`);
+            const valueDisplay = document.getElementById(`val-${sensorCode}`);
+            const statusBadge = document.getElementById(`status-${sensorCode}`);
 
-                } else {
-                    // SAFE STATE: Green, solid border, shield icon
-                    statusDisplay.classList.remove('pulse-red-glow', 'border-red-500', 'bg-red-900/40');
-                    statusDisplay.classList.add('border-green-400', 'bg-green-900/40');
-                    statusMessage.textContent = 'All Clear (Safe)';
-                    statusMessage.classList.remove('text-red-400');
-                    statusMessage.classList.add('text-green-400');
+            valueDisplay.textContent = value;
 
-                    statusIcon.className = 'bx bxs-shield-check text-green-400 text-6xl mb-3 transition-colors'; // Boxicon shield check
-                    gasValueDisplay.classList.remove('text-red-300');
-                    gasValueDisplay.classList.add('text-white');
-                }
+            card.classList.remove('pulse-red-glow', 'border-red-500', 'border-green-400/50', 'border-gray-600/50');
+            statusBadge.classList.remove('text-red-400', 'text-green-400', 'text-gray-500');
+
+            if (isAlarm) {
+                // DANGER STATE
+                card.classList.add('pulse-red-glow', 'border-red-500');
+                statusBadge.textContent = 'DANGER';
+                statusBadge.classList.add('text-red-400');
             } else {
-                // DISCONNECTED STATE: Default blue/gray
-                statusDisplay.classList.remove('pulse-red-glow', 'border-red-500', 'border-green-400', 'bg-red-900/40', 'bg-green-900/40');
-                statusDisplay.classList.add('bg-gray-700/30', 'border-transparent');
-                statusMessage.textContent = 'Awaiting Connection...';
-                statusMessage.classList.remove('text-red-400', 'text-green-400');
-                statusMessage.classList.add('text-blue-400');
-                
-                statusIcon.className = 'bx bx-bluetooth text-blue-400 text-5xl mb-3 transition-colors'; // Boxicon bluetooth symbol
-                gasValueDisplay.classList.remove('text-red-300');
-                gasValueDisplay.classList.add('text-white');
+                // SAFE STATE
+                card.classList.add('border-green-400/50');
+                statusBadge.textContent = 'SAFE';
+                statusBadge.classList.add('text-green-400');
             }
         }
 
+
         // --- BLE Event Handlers ---
         function handleGasValueChange(event) {
-            // Data received from ESP32 is a DataView. We convert it to a string.
             const value = event.target.value;
             const decoder = new TextDecoder('utf-8');
             const dataString = decoder.decode(value);
             
-            const gasValue = parseInt(dataString, 10);
-            const isAlarm = gasValue > GAS_THRESHOLD;
+            log(`Raw Data: ${dataString}`);
 
-            log(`Data received: ${gasValue} (Alarm: ${isAlarm ? 'TRUE' : 'FALSE'})`);
-            updateUI(true, gasValue, isAlarm);
+            // Expected format: MQ2:1200,MQ7:400,MQ135:500
+            const readings = dataString.split(',').map(pair => {
+                const parts = pair.split(':');
+                return { key: parts[0], value: parseInt(parts[1], 10) };
+            });
+
+            // Distribute parsed values to respective cards
+            let globalAlarm = false;
+            readings.forEach(reading => {
+                const sensorCode = reading.key.toLowerCase();
+                const value = reading.value;
+                if (sensorCode && !isNaN(value)) {
+                    updateCard(sensorCode, value);
+                    // Check if any sensor is in alarm state
+                    if (value > THRESHOLDS[reading.key]) {
+                        globalAlarm = true;
+                    }
+                }
+            });
+            
+            // Optionally update the global status based on the overall alarm state
+            if (globalAlarm) {
+                 globalStatus.innerHTML = `<i class='bx bxs-error-alt mr-2 text-xl text-red-400 bx-flashing'></i> **MULTIPLE GAS ALERT**`;
+            } else if (bleDevice && bleDevice.gatt.connected) {
+                 globalStatus.innerHTML = `<i class='bx bxs-check-circle mr-2 text-xl text-green-400'></i> Connected to ${DEVICE_NAME}`;
+            }
         }
 
         function onDisconnected(event) {
             log('Device disconnected. Re-enabling connect button.');
-            updateUI(false);
+            updateUIConnection(false);
             gasCharacteristic = null;
             bleDevice = null;
         }
 
         // --- Main Connection Logic ---
         async function connectBLE() {
-            // If already connected, disconnect
             if (bleDevice && bleDevice.gatt.connected) {
                 bleDevice.gatt.disconnect();
-                return; // Disconnect handled by onDisconnected listener
+                return;
             }
 
             log('Attempting to connect to BLE device...');
-            updateUI(false, 'Scanning...');
+            updateUIConnection(false);
 
             try {
                 // 1. Request the device
-                // Added acceptAllDevices: true as a fallback, but filter by name first is best practice
                 bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: DEVICE_NAME }], 
+                    filters: [{ name: DEVICE_NAME }],
                     optionalServices: [SERVICE_UUID]
                 });
 
@@ -261,14 +282,12 @@
                 gasCharacteristic.addEventListener('characteristicvaluechanged', handleGasValueChange);
                 log('Notifications started. Receiving real-time data.');
 
-                // Initial UI update
-                updateUI(true, 'WAITING...', false);
+                updateUIConnection(true);
 
             } catch (error) {
-                // Check if error is due to user cancellation or general connection failure
                 const errorMessage = error.message.includes('User cancelled') ? 'Connection cancelled by user.' : `Connection Error: ${error.message}`;
                 log(errorMessage, true);
-                updateUI(false);
+                updateUIConnection(false);
                 gasCharacteristic = null;
                 bleDevice = null;
             }
@@ -276,6 +295,10 @@
 
         // --- Initialize ---
         window.onload = () => {
+            // Placeholder text replacement (for visual appeal)
+            document.querySelector('.text-sm.text-center.text-gray-400.mb-8').innerHTML = 
+                `<i class='bx bx-bluetooth mr-2 text-xl text-blue-400'></i> Awaiting Bluetooth Connection...`;
+
             if (!navigator.bluetooth) {
                 log("Web Bluetooth API is not supported by your browser. Use Chrome, Edge, or Brave over HTTPS.", true);
                 connectButton.disabled = true;
@@ -284,6 +307,7 @@
             }
             connectButton.addEventListener('click', connectBLE);
             log("Click 'Connect' to start monitoring.");
+            updateUIConnection(false);
         };
     </script>
 
