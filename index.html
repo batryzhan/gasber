@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Gas Monitor (Web BLE)</title>
-    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Boxicons -->
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -71,10 +69,8 @@
             <i class='bx bx-bluetooth mr-2 text-xl text-blue-400'></i> Awaiting Bluetooth Connection...
         </p>
         
-        <!-- Sensor Grid -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             
-            <!-- MQ-2 CARD (Smoke/LPG) -->
             <div id="card-mq2" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
                 <i class='bx bxs-flame text-5xl text-yellow-500 mb-3'></i>
                 <div class="text-xs font-semibold uppercase text-gray-400">MQ-2 (Smoke/LPG)</div>
@@ -82,7 +78,6 @@
                 <div id="status-mq2" class="text-sm font-bold text-green-400">SAFE</div>
             </div>
 
-            <!-- MQ-7 CARD (Carbon Monoxide) -->
             <div id="card-mq7" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
                 <i class='bx bxs-cloud text-5xl text-gray-400 mb-3'></i>
                 <div class="text-xs font-semibold uppercase text-gray-400">MQ-7 (CO)</div>
@@ -90,7 +85,6 @@
                 <div id="status-mq7" class="text-sm font-bold text-green-400">SAFE</div>
             </div>
 
-            <!-- MQ-135 CARD (Air Quality/CO2) -->
             <div id="card-mq135" class="sensor-card rounded-xl p-6 text-center border-green-400/50">
                 <i class='bx bxs-tree-alt text-5xl text-blue-400 mb-3'></i>
                 <div class="text-xs font-semibold uppercase text-gray-400">MQ-135 (Air Quality)</div>
@@ -100,12 +94,10 @@
 
         </div>
 
-        <!-- Connection Button -->
         <button id="connect-button" class="connect-button btn-disconnected w-full py-3 text-white font-bold rounded-lg transition duration-150 text-lg">
             Connect to ESP32 Device
         </button>
 
-        <!-- Debug Log -->
         <div class="mt-6">
             <p class="text-sm font-semibold text-gray-400 mb-2">Activity Log</p>
             <div id="log-box" class="text-xs text-gray-500 h-20 overflow-y-scroll bg-gray-700/50 p-2 rounded-lg border border-gray-600">
@@ -115,16 +107,19 @@
     </div>
 
     <script>
-        // --- Configuration Constants (Must match ESP32 code) ---
+        // --- Configuration Constants (MUST match ESP32 code) ---
         const SERVICE_UUID = '0d783b9c-54a7-47b7-8798-e4b2d354b38d';
         const CHARACTERISTIC_UUID = '1a90c5be-141d-4034-8c88-662541a79f17';
-        const DEVICE_NAME = 'MQ2_Gas_Sensor';
+        // FIX: The DEVICE_NAME must match the ESP32 code: "ESP32_Gas_Monitor"
+        const DEVICE_NAME = 'ESP32_Gas_Monitor'; 
 
-        // THRESHOLDS must match the ESP32 setup!
+        // THRESHOLDS must match the ESP32 setup for visual/UI alarm logic!
         const THRESHOLDS = {
-            'MQ2': 1800,
+            // Note: ESP32 threshold is 1500, but the web UI was set to 1800.
+            // Using 1500 for consistency with the Arduino code.
+            'MQ2': 1500,
             'MQ7': 1500,
-            'MQ135': 2000
+            'MQ135': 1500
         };
         
         // --- DOM Elements ---
@@ -256,7 +251,7 @@
             updateUIConnection(false);
 
             try {
-                // 1. Request the device
+                // 1. Request the device, filtered by the correct name
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ name: DEVICE_NAME }],
                     optionalServices: [SERVICE_UUID]
