@@ -110,12 +110,11 @@
         // --- Configuration Constants (MUST match ESP32 code) ---
         const SERVICE_UUID = '0d783b9c-54a7-47b7-8798-e4b2d354b38d';
         const CHARACTERISTIC_UUID = '1a90c5be-141d-4034-8c88-662541a79f17';
-        // FIX: The DEVICE_NAME must match the ESP32 code: "ESP32_Gas_Monitor"
+        // The DEVICE_NAME must match the ESP32 code: "ESP32_Gas_Monitor"
         const DEVICE_NAME = 'ESP32_Gas_Monitor'; 
 
         // THRESHOLDS must match the ESP32 setup for visual/UI alarm logic!
         const THRESHOLDS = {
-            // Note: ESP32 threshold is 1500, but the web UI was set to 1800.
             // Using 1500 for consistency with the Arduino code.
             'MQ2': 1500,
             'MQ7': 1500,
@@ -159,7 +158,7 @@
                     document.getElementById(`val-${sensor}`).textContent = '---';
                     document.getElementById(`status-${sensor}`).textContent = 'OFFLINE';
                     document.getElementById(`status-${sensor}`).className = 'text-sm font-bold text-gray-500';
-                    document.getElementById(`card-${sensor}`).classList.remove('pulse-red-glow', 'border-red-500', 'border-green-400');
+                    document.getElementById(`card-${sensor}`).classList.remove('pulse-red-glow', 'border-red-500', 'border-green-400/50');
                     document.getElementById(`card-${sensor}`).classList.add('border-gray-600/50');
                 });
             }
@@ -172,7 +171,8 @@
          */
         function updateCard(sensorCode, value) {
             const threshold = THRESHOLDS[sensorCode.toUpperCase()];
-            const isAlarm = value > threshold;
+            // Individual card alarm logic based on local thresholds
+            const isAlarm = value > threshold; 
 
             const card = document.getElementById(`card-${sensorCode}`);
             const valueDisplay = document.getElementById(`val-${sensorCode}`);
@@ -197,39 +197,43 @@
         }
 
 
-        // --- BLE Event Handlers ---
+        // --- BLE Event Handlers (FIXED to handle binary structure) ---
         function handleGasValueChange(event) {
-            const value = event.target.value;
-            const decoder = new TextDecoder('utf-8');
-            const dataString = decoder.decode(value);
+            const value = event.target.value; // This is a DataView
             
-            log(`Raw Data: ${dataString}`);
+            // Expected size: 3 x int32 (4 bytes each) + 1 x bool (1 byte) = 13 bytes
+            if (value.byteLength !== 13) {
+                log(`Error: Expected 13 bytes, received ${value.byteLength} bytes. Skipping update.`, true);
+                return;
+            }
 
-            // Expected format: MQ2:1200,MQ7:400,MQ135:500
-            const readings = dataString.split(',').map(pair => {
-                const parts = pair.split(':');
-                return { key: parts[0], value: parseInt(parts[1], 10) };
-            });
+            // ESP32 is Little Endian, so pass 'true' to getInt32/getUint8
+            try {
+                // 1. Read MQ2 (0-3 bytes, int32)
+                const mq2_val = value.getInt32(0, true); 
+                // 2. Read MQ7 (4-7 bytes, int32)
+                const mq7_val = value.getInt32(4, true); 
+                // 3. Read MQ135 (8-11 bytes, int32)
+                const mq135_val = value.getInt32(8, true); 
+                // 4. Read alarm_state (12 byte, bool/uint8)
+                const alarm_state = value.getUint8(12) === 1;
 
-            // Distribute parsed values to respective cards
-            let globalAlarm = false;
-            readings.forEach(reading => {
-                const sensorCode = reading.key.toLowerCase();
-                const value = reading.value;
-                if (sensorCode && !isNaN(value)) {
-                    updateCard(sensorCode, value);
-                    // Check if any sensor is in alarm state
-                    if (value > THRESHOLDS[reading.key]) {
-                        globalAlarm = true;
-                    }
+                log(`Decoded Data: MQ2=${mq2_val}, MQ7=${mq7_val}, MQ135=${mq135_val}, Alarm=${alarm_state ? 'ON' : 'OFF'}`);
+
+                // Update individual cards (uses local threshold logic for card styling)
+                updateCard('mq2', mq2_val);
+                updateCard('mq7', mq7_val);
+                updateCard('mq135', mq135_val);
+                
+                // Update global status based on the actual alarm state from ESP32
+                if (alarm_state) {
+                     globalStatus.innerHTML = `<i class='bx bxs-error-alt mr-2 text-xl text-red-400 bx-flashing'></i> **GAS ALERT DETECTED**`;
+                } else if (bleDevice && bleDevice.gatt.connected) {
+                     globalStatus.innerHTML = `<i class='bx bxs-check-circle mr-2 text-xl text-green-400'></i> Connected to ${DEVICE_NAME}`;
                 }
-            });
-            
-            // Optionally update the global status based on the overall alarm state
-            if (globalAlarm) {
-                 globalStatus.innerHTML = `<i class='bx bxs-error-alt mr-2 text-xl text-red-400 bx-flashing'></i> **MULTIPLE GAS ALERT**`;
-            } else if (bleDevice && bleDevice.gatt.connected) {
-                 globalStatus.innerHTML = `<i class='bx bxs-check-circle mr-2 text-xl text-green-400'></i> Connected to ${DEVICE_NAME}`;
+
+            } catch (e) {
+                log(`Error parsing binary data: ${e.message}`, true);
             }
         }
 
@@ -251,7 +255,7 @@
             updateUIConnection(false);
 
             try {
-                // 1. Request the device, filtered by the correct name
+                // 1. Request the device, filtered by the correct name and service UUID
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ name: DEVICE_NAME }],
                     optionalServices: [SERVICE_UUID]
@@ -291,7 +295,7 @@
         // --- Initialize ---
         window.onload = () => {
             // Placeholder text replacement (for visual appeal)
-            document.querySelector('.text-sm.text-center.text-gray-400.mb-8').innerHTML = 
+            document.querySelector('#global-status').innerHTML = 
                 `<i class='bx bx-bluetooth mr-2 text-xl text-blue-400'></i> Awaiting Bluetooth Connection...`;
 
             if (!navigator.bluetooth) {
