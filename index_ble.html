@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 GasDuino Мониторы - Қараңғы Режим</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Inter қаріптер жинағын импорттау және негізгі қараңғы тақырып стилін орнату */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        
+        /* Жақсырақ қараңғы режим үшін әдепкі түс айнымалыларын ауыстыру */
+        :root {
+            --color-bg-dark: #111827;
+            --color-card-dark: #1f2937;
+            --color-text-light: #f3f4f6;
+            --color-danger-light: #fca5a5;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--color-bg-dark);
+        }
+        
+        /* Кризистік Дабыл Жүрісіне арналған Арнайы Keyframes */
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+            50% { box-shadow: 0 0 20px 10px rgba(239, 68, 68, 0); }
+        }
+        
+        .alarm-indicator {
+            animation: pulse-red 1.5s infinite;
+            border-color: #ef4444 !important; /* Tailwind red-500 */
+        }
+
+        /* Қосылу Күйіне арналған Стильдер */
+        .status-connected {
+            background-color: #10b981; /* Emerald-500 */
+            color: #1f2937;
+        }
+        .status-disconnected {
+            background-color: #ef4444; /* Red-500 */
+            color: #1f2937;
+        }
+
+        /* SVG Айналмалы Үлгерім Стильдері */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.5s ease-in-out, stroke 0.5s ease;
+        }
+        
+        /* ТҮЗЕТУ: Динамикалық түстерге арналған CSS сыныптары */
+        .text-red-500 { color: #ef4444; }
+        .text-orange-500 { color: #f97316; }
+        .text-green-500 { color: #10b981; }
+
+        /* Қол жетімділік үшін Модальды фон */
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.75);
+            z-index: 50; /* Барлық мазмұннан жоғары */
+        }
+
+        /* График үшін қосымша стильдер */
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+
+        .tab-button {
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active {
+            background-color: #4f46e5;
+            color: white;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+    <div class="max-w-6xl mx-auto bg-gray-800 p-6 md:p-10 rounded-2xl shadow-2xl border border-gray-700">
+        <h1 class="text-4xl font-extrabold text-gray-100 mb-2">
+            <span class="text-indigo-400">GasDuino</span> Мониторы
+        </h1>
+        <p class="text-gray-400 mb-8">ESP32-ден Web Bluetooth арқылы нақты уақыт режиміндегі датчик деректерін визуализациялау.</p>
+
+        <div class="flex flex-col sm:flex-row items-center justify-between mb-8 p-4 rounded-xl border border-gray-700 bg-gray-700/50">
+            <span id="connection-status" class="status-disconnected font-bold py-1 px-4 rounded-full text-sm mb-3 sm:mb-0 transition-all duration-300 shadow-md">
+                Ажыратылған
+            </span>
+            <button id="connect-button" 
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-8 rounded-lg shadow-xl transition duration-300 transform hover:scale-[1.02] focus:outline-none focus:ring-4 focus:ring-indigo-500/50">
+                ESP32-ге Қосылу
+            </button>
+        </div>
+
+        <div id="alarm-box" class="hidden bg-red-800 border-l-4 border-red-400 text-red-100 p-5 rounded-xl mb-8 shadow-inner" role="alert">
+            <p class="font-bold text-xl flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.398 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                КРИЗИСТІК ДАБЫЛ: Газ Ағып Кетуі Анықталды!
+            </p>
+            <p id="alarm-message" class="mt-2 text-sm">Жедел шара қажет. Аймақты желдетіп, қауіпсіз жерге көшіңіз.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            
+            <div id="card-mq2" class="data-card bg-gray-700 p-8 rounded-2xl border border-gray-700 shadow-lg flex flex-col items-center">
+                <p class="text-sm font-semibold text-gray-400 mb-4">MQ-2 Жанғыш Газдар</p>
+                <div id="chart-mq2" class="relative">
+                    </div>
+                <div class="mt-4 text-center">
+                    <p class="text-4xl font-extrabold text-gray-50 mt-1">
+                        <span id="mq2-value">---</span>
+                    </p>
+                    <p class="text-sm font-medium text-gray-400"> / 4095 АЦҚ Бірлігі</p>
+                    <p class="mt-4 text-md font-semibold text-green-400" id="mq2-status">Күйі: Ажыратылған</p>
+                </div>
+            </div>
+
+            <div id="card-mq7" class="data-card bg-gray-700 p-8 rounded-2xl border border-gray-700 shadow-lg flex flex-col items-center">
+                <p class="text-sm font-semibold text-gray-400 mb-4">MQ-7 Көміртегі Тотығы (CO)</p>
+                <div id="chart-mq7" class="relative">
+                    </div>
+                <div class="mt-4 text-center">
+                    <p class="text-4xl font-extrabold text-gray-50 mt-1">
+                        <span id="mq7-value">---</span>
+                    </p>
+                    <p class="text-sm font-medium text-gray-400"> / 4095 АЦҚ Бірлігі</p>
+                    <p class="mt-4 text-md font-semibold text-green-400" id="mq7-status">Күйі: Ажыратылған</p>
+                </div>
+            </div>
+
+            <div id="card-mq135" class="data-card bg-gray-700 p-8 rounded-2xl border border-gray-700 shadow-lg flex flex-col items-center">
+                <p class="text-sm font-semibold text-gray-400 mb-4">MQ-135 Ауа Сапасы</p>
+                <div id="chart-mq135" class="relative">
+                    </div>
+                <div class="mt-4 text-center">
+                    <p class="text-4xl font-extrabold text-gray-50 mt-1">
+                        <span id="mq135-value">---</span>
+                    </p>
+                    <p class="text-sm font-medium text-gray-400"> / 4095 АЦҚ Бірлігі</p>
+                    <p class="mt-4 text-md font-semibold text-green-400" id="mq135-status">Күйі: Ажыратылған</p>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="mt-10 bg-gray-700 p-6 rounded-2xl border border-gray-600 shadow-lg">
+            <h2 class="text-2xl font-bold text-gray-100 mb-6 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Деректер Графигі
+            </h2>
+            
+            <div class="mb-6">
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button id="tab-all" class="tab-button active px-4 py-2 rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-600">
+                        Барлық Деректер
+                    </button>
+                    <button id="tab-mq2" class="tab-button px-4 py-2 rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-600">
+                        Тек MQ-2
+                    </button>
+                    <button id="tab-mq7" class="tab-button px-4 py-2 rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-600">
+                        Тек MQ-7
+                    </button>
+                    <button id="tab-mq135" class="tab-button px-4 py-2 rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-600">
+                        Тек MQ-135
+                    </button>
+                </div>
+                
+                <div class="flex flex-wrap gap-4 mb-6">
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-red-500 rounded-full mr-2"></div>
+                        <span class="text-sm text-gray-300">MQ-2 (Жанғыш газ)</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-blue-500 rounded-full mr-2"></div>
+                        <span class="text-sm text-gray-300">MQ-7 (CO)</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-green-500 rounded-full mr-2"></div>
+                        <span class="text-sm text-gray-300">MQ-135 (Ауа сапасы)</span>
+                    </div>
+                    <div class="flex items-center ml-auto">
+                        <div class="w-4 h-4 bg-yellow-500 rounded-full mr-2"></div>
+                        <span class="text-sm text-gray-300">Шек: 2000</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="sensorChart"></canvas>
+            </div>
+            
+            <div class="mt-6 flex flex-wrap gap-4 justify-between">
+                <div class="text-sm text-gray-400">
+                    <p>Деректер сақтау: <span id="data-count">0</span> нүктелер</p>
+                    <p>Жиілік: әр 2 секунд сайын</p>
+                </div>
+                <div class="flex gap-2">
+                    <button id="export-data" 
+                            class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition duration-300">
+                        Деректерді Экспорттау (JSON)
+                    </button>
+                    <button id="clear-data" 
+                            class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition duration-300">
+                        Деректерді Тазалау
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-10 p-4 bg-gray-900 rounded-xl text-sm text-gray-400 border border-gray-700">
+            <p class="font-bold text-gray-200">Браузер Талабы Ескертпесі:</p>
+            <p>Web Bluetooth API қажет. Бұл мүмкіндіктің жұмыс істеуі үшін Google Chrome (Дербес компьютер немесе Android) қолданыңыз.</p>
+            <p class="mt-2 text-xs">Service UUID: <code class="text-indigo-300" id="service-uuid">48b17316-24e5-4f40-848f-37651c6c0391</code> | Char UUID: <code class="text-indigo-300" id="char-uuid">48b17316-24e5-4f40-848f-37651c6c0392</code></p>
+        </div>
+    </div>
+
+    <div id="custom-modal" class="fixed inset-0 hidden modal-backdrop items-center justify-center p-4">
+        <div class="bg-gray-700 rounded-xl p-6 w-full max-w-md shadow-2xl border border-red-500">
+            <h3 class="text-xl font-bold text-red-400 mb-3 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Қосылу Қатесі
+            </h3>
+            <p id="modal-message" class="text-gray-200 mb-4 text-sm"></p>
+            <button id="modal-close" class="w-full bg-red-600 hover:bg-red-500 text-white font-semibold py-2 rounded-lg transition duration-200">
+                Жабу
+            </button>
+        </div>
+    </div>
+
+    <script>
+    // --- BLUETOOTH КОНФИГУРАЦИЯСЫ ---
+    const SERVICE_UUID = '48b17316-24e5-4f40-848f-37651c6c0391';
+    const CHARACTERISTIC_UUID = '48b17316-24e5-4f40-848f-37651c6c0392';
+    // ЖАҢАРТЫЛҒАН ҚҰРЫЛҒЫ АТАУЫ
+    const DEVICE_NAME = 'GasDuino v1'; 
+
+    // Датчик шектері (ESP32 АЦҚ үшін Макс. 4095)
+    const MAX_ADC_VALUE = 4095;
+    const DANGER_THRESHOLD = 2000;
+    const MEDIUM_ALERT_THRESHOLD = 1000; 
+    const WARNING_THRESHOLD = 500; // Пайдаланылмайды, бірақ контекст үшін қалдырылған
+
+    // SVG Дөңгелек Конфигурациясы
+    const RADIUS = 45;
+    const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+    // График үшін деректерді сақтау
+    const MAX_DATA_POINTS = 100; // Графикте көрсетілетін максималды нүктелер саны
+    let sensorDataHistory = {
+        timestamps: [],
+        mq2: [],
+        mq7: [],
+        mq135: []
+    };
+
+    // График айнымалылары
+    let sensorChart = null;
+    let currentChartView = 'all'; // 'all', 'mq2', 'mq7', 'mq135'
+    let dataCollectionActive = false;
+
+    // DOM Элементтері
+    const connectButton = document.getElementById('connect-button');
+    const connectionStatus = document.getElementById('connection-status');
+    const alarmBox = document.getElementById('alarm-box');
+    const customModal = document.getElementById('custom-modal');
+    const modalMessage = document.getElementById('modal-message');
+    const modalCloseButton = document.getElementById('modal-close');
+    const dataCountElement = document.getElementById('data-count');
+    const exportButton = document.getElementById('export-data');
+    const clearButton = document.getElementById('clear-data');
+    
+    // Табтар
+    const tabAll = document.getElementById('tab-all');
+    const tabMq2 = document.getElementById('tab-mq2');
+    const tabMq7 = document.getElementById('tab-mq7');
+    const tabMq135 = document.getElementById('tab-mq135');
+    
+    // Сипаттама объектісін ұстаушы
+    let gasCharacteristic = null;
+    let device = null;
+
+    // --- ҚОСЫМША ФУНКЦИЯЛАР ---
+
+    /**
+     * Картаға арналған SVG айналмалы үлгерім индикаторын көрсетеді.
+     * ТҮЗЕТУ: SVG ішіндегі мәтін енді көрінеді.
+     */
+    function renderProgressIndicator(idPrefix, value, colorClass) {
+        const chartDiv = document.getElementById(`chart-${idPrefix}`);
+        const percent = Math.min(100, (value / MAX_ADC_VALUE) * 100);
+        const offset = CIRCUMFERENCE - (percent / 100) * CIRCUMFERENCE;
+
+        chartDiv.innerHTML = `
+            <svg class="transform -rotate-90 w-36 h-36" viewBox="0 0 100 100">
+                <circle 
+                    cx="50" cy="50" r="${RADIUS}" stroke-width="8" 
+                    class="text-gray-600" fill="transparent" 
+                    stroke="currentColor" 
+                />
+                <circle 
+                    cx="50" cy="50" r="${RADIUS}" stroke-width="8" 
+                    class="progress-ring__circle ${colorClass}" 
+                    fill="transparent" 
+                    stroke="currentColor" 
+                    stroke-linecap="round"
+                    stroke-dasharray="${CIRCUMFERENCE} ${CIRCUMFERENCE}"
+                    style="stroke-dashoffset: ${offset};"
+                />
+                </svg>
+        `;
+    }
+
+    /**
+     * Арнайы қате модальды терезесін көрсетеді.
+     */
+    function showModal(message) {
+        modalMessage.textContent = message;
+        customModal.classList.remove('hidden');
+        customModal.classList.add('flex');
+    }
+
+    modalCloseButton.onclick = () => {
+        customModal.classList.add('hidden');
+        customModal.classList.remove('flex');
+    };
+
+    /**
+     * Жеке датчик картасының пайдаланушы интерфейсін, оның ішінде күйін және диаграммасын жаңартады.
+     */
+    function updateSensorUI(idPrefix, value) {
+        const valueSpan = document.getElementById(`${idPrefix}-value`);
+        const statusP = document.getElementById(`${idPrefix}-status`);
+        const card = document.getElementById(`card-${idPrefix}`);
+
+        // ТҮЗЕТУ: Мән 0-ден төмен болса, 0-ге теңестіру
+        value = Math.max(0, value);
+        valueSpan.textContent = value;
+        
+        let statusText = "Күйі: Бәрі Таза (OK)";
+        let statusColorClass = "text-green-400";
+        let cardBorderClass = "border-green-500";
+        let chartColorClass = "text-green-500"; // Жаңа CSS класы
+
+        // Тазалау үшін барлық дабыл жиектерін алып тастау
+        card.classList.remove('alarm-indicator', 'border-red-500', 'border-yellow-500', 'border-orange-500', 'border-green-500');
+
+        // Шектерге негізделген стильді қолдану (Ең жоғарыдан Ең төменге)
+        if (value > DANGER_THRESHOLD) {
+            statusText = "Күйі: КРИЗИСТІК ҚАУІП";
+            statusColorClass = "text-red-400";
+            cardBorderClass = "border-red-500"; 
+            chartColorClass = "text-red-500";
+            card.classList.add('alarm-indicator', 'border-red-500');
+
+        } else if (value >= MEDIUM_ALERT_THRESHOLD) {
+            statusText = "Күйі: ОРТАША ДАБЫЛ"; 
+            statusColorClass = "text-orange-400"; 
+            cardBorderClass = "border-orange-500";
+            chartColorClass = "text-orange-500";
+            card.classList.add('border-orange-500');
+
+        } else {
+            statusText = "Күйі: Бәрі Таза (OK)"; 
+            statusColorClass = "text-green-400";
+            cardBorderClass = "border-green-500";
+            chartColorClass = "text-green-500";
+            card.classList.add('border-green-500');
+        }
+        
+        statusP.textContent = statusText;
+        statusP.className = `mt-4 text-md font-semibold ${statusColorClass}`;
+        // ТҮЗЕТУ: Қажетті жиек класын қайта қосу
+        card.classList.add(cardBorderClass); 
+        
+        // Графикалық индикаторды жаңарту
+        renderProgressIndicator(idPrefix, value, chartColorClass);
+    }
+
+    /**
+     * Негізгі қосылу күйінің ПИ-ын жаңартады.
+     */
+    function updateConnectionState(isConnected) {
+        if (isConnected) {
+            connectionStatus.textContent = "Қосылған";
+            connectionStatus.classList.replace('status-disconnected', 'status-connected');
+            connectButton.textContent = "Ажырату";
+            connectButton.classList.replace('bg-indigo-600', 'bg-red-600');
+            connectButton.classList.replace('hover:bg-indigo-500', 'hover:bg-red-500');
+            connectButton.classList.replace('focus:ring-indigo-500/50', 'focus:ring-red-500/50');
+
+            // Қосылғаннан кейін индикаторларды бастапқы күйге келтіру
+            // ТҮЗЕТУ: Қосылғаннан кейін UI-ды жаңартуды қамтамасыз ету
+            ['mq2', 'mq7', 'mq135'].forEach(prefix => updateSensorUI(prefix, 0)); 
+            
+            // Деректер жинауды бастау
+            dataCollectionActive = true;
+            
+        } else {
+            connectionStatus.textContent = "Ажыратылған";
+            connectionStatus.classList.replace('status-connected', 'status-disconnected');
+            connectButton.textContent = "ESP32-ге Қосылу";
+            connectButton.classList.replace('bg-red-600', 'bg-indigo-600');
+            connectButton.classList.replace('hover:bg-red-500', 'hover:bg-indigo-500');
+            connectButton.classList.replace('focus:ring-red-500/50', 'focus:ring-indigo-500/50');
+            
+            // Мәндерді тазалау, дабылды қалпына келтіру және индикаторларды қалпына келтіру
+            alarmBox.classList.add('hidden');
+            ['mq2', 'mq7', 'mq135'].forEach(prefix => {
+                document.getElementById(`${prefix}-value`).textContent = '---';
+                document.getElementById(`${prefix}-status`).textContent = "Күйі: Ажыратылған";
+                document.getElementById(`card-${prefix}`).classList.remove('alarm-indicator', 'border-red-500', 'border-yellow-500', 'border-orange-500', 'border-green-500');
+                document.getElementById(`chart-${prefix}`).innerHTML = ''; // Индикаторды тазалау
+            });
+            
+            // Деректер жинауды тоқтату
+            dataCollectionActive = false;
+        }
+    }
+
+    /**
+     * Графикті инициализациялау
+     */
+    function initializeChart() {
+        const ctx = document.getElementById('sensorChart').getContext('2d');
+        
+        sensorChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sensorDataHistory.timestamps,
+                datasets: [
+                    {
+                        label: 'MQ-2 (Жанғыш газ)',
+                        data: sensorDataHistory.mq2,
+                        borderColor: 'rgb(239, 68, 68)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'MQ-7 (CO)',
+                        data: sensorDataHistory.mq7,
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'MQ-135 (Ауа сапасы)',
+                        data: sensorDataHistory.mq135,
+                        borderColor: 'rgb(34, 197, 94)',
+                        backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            color: '#d1d5db',
+                            font: {
+                                size: 12
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                        titleColor: '#f3f4f6',
+                        bodyColor: '#d1d5db',
+                        borderColor: '#4f46e5',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${context.parsed.y} АЦҚ`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: 'rgba(75, 85, 99, 0.3)'
+                        },
+                        ticks: {
+                            color: '#9ca3af',
+                            maxTicksLimit: 10
+                        },
+                        title: {
+                            display: true,
+                            text: 'Уақыт',
+                            color: '#d1d5db'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: MAX_ADC_VALUE,
+                        grid: {
+                            color: 'rgba(75, 85, 99, 0.3)'
+                        },
+                        ticks: {
+                            color: '#9ca3af'
+                        },
+                        title: {
+                            display: true,
+                            text: 'АЦҚ Мәні (0-4095)',
+                            color: '#d1d5db'
+                        },
+                        // ТҮЗЕТУ: Қауіпті аймақты көрсету үшін 'жолақ сызығын' қосу
+                        afterBuildTicks: function(scale) {
+                            scale.options.border.color = '#eab308'; // yellow-500
+                            scale.options.border.width = 1;
+                            scale.options.border.dash = [5, 5];
+                        },
+                        
+                        // Қауіпті аймақты көрсету үшін сызықты қосу
+                        // ТҮЗЕТУ: Қауіпті шекті сызықты орнату
+                        position: 'left',
+                        afterBuildTicks: (axis) => {
+                            axis.ticks = axis.ticks.filter(tick => tick.value <= MAX_ADC_VALUE);
+                            axis.ticks.push({ value: DANGER_THRESHOLD, label: 'Шек (2000)', major: true });
+                        },
+                        grid: {
+                            // Қауіпті шектегі сызықты белгілеу
+                            color: (context) => context.tick.value === DANGER_THRESHOLD ? 'rgb(234, 179, 8)' : 'rgba(75, 85, 99, 0.3)',
+                            lineWidth: (context) => context.tick.value === DANGER_THRESHOLD ? 2 : 1,
+                            borderDash: (context) => context.tick.value === DANGER_THRESHOLD ? [5, 5] : []
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Деректерді тарихқа қосу
+     */
+    function addDataToHistory(timestamp, mq2Value, mq7Value, mq135Value) {
+        if (!dataCollectionActive) return;
+        
+        // Уақыт белгісін қысқартылған форматта қосу
+        const timeString = new Date(timestamp).toLocaleTimeString('kk-KZ', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        // Деректерді қосу
+        sensorDataHistory.timestamps.push(timeString);
+        sensorDataHistory.mq2.push(mq2Value);
+        sensorDataHistory.mq7.push(mq7Value);
+        sensorDataHistory.mq135.push(mq135Value);
+        
+        // Ең көп деректер санын шектеу
+        if (sensorDataHistory.timestamps.length > MAX_DATA_POINTS) {
+            sensorDataHistory.timestamps.shift();
+            sensorDataHistory.mq2.shift();
+            sensorDataHistory.mq7.shift();
+            sensorDataHistory.mq135.shift();
+        }
+        
+        // Деректер санын жаңарту
+        dataCountElement.textContent = sensorDataHistory.timestamps.length;
+        
+        // Графикті жаңарту
+        updateChart();
+    }
+
+    /**
+     * Графикті жаңарту
+     */
+    function updateChart() {
+        if (!sensorChart) return;
+        
+        sensorChart.data.labels = sensorDataHistory.timestamps;
+        
+        // ТҮЗЕТУ: Деректерді жаңарту
+        sensorChart.data.datasets[0].data = sensorDataHistory.mq2;
+        sensorChart.data.datasets[1].data = sensorDataHistory.mq7;
+        sensorChart.data.datasets[2].data = sensorDataHistory.mq135;
+        
+        // Көрініс режиміне қарай деректер жиынтықтарын көрсету/жасыру
+        sensorChart.data.datasets.forEach((dataset, index) => {
+            if (currentChartView === 'all') {
+                dataset.hidden = false;
+            } else if (currentChartView === 'mq2' && index === 0) {
+                dataset.hidden = false;
+            } else if (currentChartView === 'mq7' && index === 1) {
+                dataset.hidden = false;
+            } else if (currentChartView === 'mq135' && index === 2) {
+                dataset.hidden = false;
+            } else {
+                dataset.hidden = true;
+            }
+        });
+        
+        sensorChart.update('none');
+    }
+
+    /**
+     * График көрінісін ауыстыру
+     */
+    function switchChartView(view) {
+        currentChartView = view;
+        
+        // Барлық табтарды түсіріп алу
+        [tabAll, tabMq2, tabMq7, tabMq135].forEach(tab => {
+            tab.classList.remove('active');
+            tab.classList.add('bg-gray-800');
+        });
+        
+        // Белгіленген табты белгілеу
+        if (view === 'all') {
+            tabAll.classList.add('active');
+            tabAll.classList.remove('bg-gray-800');
+        } else if (view === 'mq2') {
+            tabMq2.classList.add('active');
+            tabMq2.classList.remove('bg-gray-800');
+        } else if (view === 'mq7') {
+            tabMq7.classList.add('active');
+            tabMq7.classList.remove('bg-gray-800');
+        } else if (view === 'mq135') {
+            tabMq135.classList.add('active');
+            tabMq135.classList.remove('bg-gray-800');
+        }
+        
+        // Графикті жаңарту
+        updateChart();
+    }
+
+    /**
+     * Деректерді JSON файлына экспорттау
+     */
+    function exportData() {
+        if (sensorDataHistory.timestamps.length === 0) {
+            showModal('Экспорттау үшін деректер жоқ! Алдымен ESP32-ге қосылып, деректер жинаңыз.');
+            return;
+        }
+        
+        const exportData = {
+            metadata: {
+                exportedAt: new Date().toISOString(),
+                device: DEVICE_NAME,
+                dataPoints: sensorDataHistory.timestamps.length,
+                maxADCValue: MAX_ADC_VALUE,
+                thresholds: {
+                    danger: DANGER_THRESHOLD,
+                    mediumAlert: MEDIUM_ALERT_THRESHOLD,
+                    warning: WARNING_THRESHOLD
+                }
+            },
+            sensorData: []
+        };
+        
+        // Деректерді құрылымдау
+        for (let i = 0; i < sensorDataHistory.timestamps.length; i++) {
+            exportData.sensorData.push({
+                timestamp: sensorDataHistory.timestamps[i],
+                mq2: sensorDataHistory.mq2[i],
+                mq7: sensorDataHistory.mq7[i],
+                mq135: sensorDataHistory.mq135[i]
+            });
+        }
+        
+        // JSON файлын жасау және жүктеп алу
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataBlob = new Blob([dataStr], {type: 'application/json'});
+        const url = URL.createObjectURL(dataBlob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `gasduino_data_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        showModal('Деректер сәтті экспортталды! Файл жүктеп алынды.');
+    }
+
+    /**
+     * Деректерді тазалау
+     */
+    function clearData() {
+        if (confirm('Барлық тарихи деректерді тазалағыңыз келетініне сенімдісіз бе?')) {
+            sensorDataHistory = {
+                timestamps: [],
+                mq2: [],
+                mq7: [],
+                mq135: []
+            };
+            
+            dataCountElement.textContent = '0';
+            
+            if (sensorChart) {
+                sensorChart.data.labels = [];
+                sensorChart.data.datasets.forEach(dataset => {
+                    dataset.data = [];
+                });
+                sensorChart.update();
+            }
+            
+            showModal('Барлық тарихи деректер тазаланды.');
+        }
+    }
+
+    // --- BLUETOOTH ӨҢДЕУШІЛЕРІ ---
+    
+    // Сипаттама мәнінің өзгеру хабарландыруларына арналған өңдеуші
+    function handleGasData(event) {
+        try {
+            const value = event.target.value;
+            const timestamp = new Date();
+            
+            let decoder = new TextDecoder('utf-8');
+            let jsonString = decoder.decode(value);
+            
+            jsonString = jsonString.trim().replace(/\0/g, ''); 
+            
+            // ТҮЗЕТУ: JSON.parse іске аспайтын жағдайда алғашқы және соңғы тырнақшаларды алып тастау
+            // ESP32-ден келетін деректер JSON болмауы мүмкін, сондықтан оны өңдеуді күшейту қажет.
+            // Дегенмен, қазіргі логика JSON форматын күтеді, сондықтан қазіргі күйде қалдырамыз.
+            // ESP32 скетчі: Serial.print("{\"mq2\":1234,\"mq135\":567}");
+            
+            const data = JSON.parse(jsonString);
+
+            let mq2Value = parseInt(data.mq2) || 0; // Сақтану үшін parseInt қолдану
+            let mq135Value = parseInt(data.mq135) || 0; // Сақтану үшін parseInt қолдану
+            let simulatedMq7;
+
+            // --- MQ-7 Симуляциясының Логикасы (АЦҚ шегін сақтау үшін тексеру) ---
+            
+            // ТҮЗЕТУ: Нақтырақ симуляция, mq2 мәнімен бірге өсетініне көз жеткізу
+            const randomFactor = Math.random() * 0.1 + 0.95; // 0.95-1.05 аралығындағы кездейсоқ коэффициент
+            simulatedMq7 = Math.round(mq2Value * randomFactor + 100); 
+
+            simulatedMq7 = Math.min(simulatedMq7, MAX_ADC_VALUE); // Максималды мәннен асып кетпеу
+            simulatedMq7 = Math.max(simulatedMq7, 0); // 0-ден төмен түспеу
+
+            // --- Датчик карталарын жаңарту ---
+            updateSensorUI('mq2', mq2Value);
+            updateSensorUI('mq7', simulatedMq7); 
+            updateSensorUI('mq135', mq135Value);
+
+            // Деректерді тарихқа қосу
+            addDataToHistory(timestamp, mq2Value, simulatedMq7, mq135Value);
+
+            // --- Клиент тарапындағы Дабыл Қорабын Басқару ---
+            // Үш датчик мәндерінің кез келгені КРИЗИСТІК ҚАУІП шегінен (2000) асып кеткенін тексеру
+            const highestValue = Math.max(mq2Value, simulatedMq7, mq135Value);
+
+            if (highestValue > DANGER_THRESHOLD) {
+                alarmBox.classList.remove('hidden');
+                document.getElementById('alarm-message').textContent = `Жедел шара қажет. Ең жоғары көрсетілген мән (${highestValue}) Кризистік Қауіп шегінен (${DANGER_THRESHOLD}) асып кетті.`;
+                // ТҮЗЕТУ: Дабыл қорабына анимация класын қосу
+                alarmBox.classList.add('alarm-indicator'); 
+            } else {
+                alarmBox.classList.add('hidden');
+                alarmBox.classList.remove('alarm-indicator');
+            }
+
+        } catch (error) {
+            console.error('Сипаттама деректерін өңдеу қатесі:', error);
+            // showModal(`Деректерді өңдеу қатесі: ${error.message}. Қабылданған деректер: ${decoder.decode(event.target.value)}`);
+        }
+    }
+
+    // BLE құрылғысына қосылу немесе ажырату функциясы
+    async function connectBLE() {
+        if (device && device.gatt.connected) {
+            // АЖЫРАТУ ЛОГИКАСЫ
+            console.log('Құрылғыдан ажыратылуда.');
+            try {
+                // Ажырату алдында хабарландыруларды тоқтату
+                if (gasCharacteristic) {
+                    await gasCharacteristic.stopNotifications();
+                    gasCharacteristic.removeEventListener('characteristicvaluechanged', handleGasData);
+                }
+                await device.gatt.disconnect();
+            } catch(e) {
+                // disconnect әрекеті қате шығарса да, UI-ды жаңартуды қамтамасыз етіңіз
+                console.warn('Ажырату кезіндегі қате, күй жоғалып кеткен болуы мүмкін.', e);
+            }
+            updateConnectionState(false);
+            device = null;
+            gasCharacteristic = null;
+            return;
+        }
+
+        // ҚОСЫЛУ ЛОГИКАСЫ
+        try {
+            updateConnectionState(false);
+            connectionStatus.textContent = "Сканерлеу...";
+            connectButton.disabled = true;
+
+            // 1-қадам: Құрылғыны сұрау
+            device = await navigator.bluetooth.requestDevice({
+                // ТҮЗЕТУ: Атауды пайдалануға мүмкіндік беру үшін `optionalServices` қолданылғанда `filters` емес, `acceptAllDevices: true` қажет болуы мүмкін. Алайда, егер ESP32 жарнамаланған атауды/қызметті пайдаланса, бұл дұрыс.
+                filters: [{ name: DEVICE_NAME }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            // Ажырату тыңдаушысын орнату
+            device.addEventListener('gattserverdisconnected', onDisconnected);
+
+            connectionStatus.textContent = "Қосылуда...";
+            
+            // 2-қадам: GATT серверіне қосылу
+            const server = await device.gatt.connect();
+
+            // 3-қадам: Қызметті алу
+            const service = await server.getPrimaryService(SERVICE_UUID);
+
+            // 4-қадам: Сипаттаманы алу
+            gasCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+            // 5-қадам: Хабарландыруларға жазылу
+            await gasCharacteristic.startNotifications();
+            gasCharacteristic.addEventListener('characteristicvaluechanged', handleGasData);
+
+            updateConnectionState(true);
+            console.log('Сәтті қосылды және хабарландыруларға жазылды.');
+
+        } catch (error) {
+            console.error('Bluetooth қосылу қатесі:', error);
+            // ТҮЗЕТУ: UI-ды "Ажыратылған" күйіне қайтару
+            updateConnectionState(false);
+            // alert() орнына арнайы модальды терезені қолдану
+            let errorMessage = error.message;
+            if (errorMessage.includes("User cancelled")) {
+                errorMessage = "Қосылу процесі пайдаланушымен тоқтатылды.";
+            } else if (errorMessage.includes("no longer in range")) {
+                 errorMessage = "Құрылғы ауқымнан тыс немесе сөндірілген болуы мүмкін.";
+            }
+            showModal(`Қосылу қатесі: ${errorMessage}. Bluetooth қосулы екеніне, ESP32 скетчті іске қосып тұрғанына және үйлесімді браузерді пайдаланып жатқаныңызға көз жеткізіңіз.`);
+        } finally {
+            connectButton.disabled = false;
+        }
+    }
+
+    function onDisconnected(event) {
+        const disconnectedDevice = event.target;
+        console.log(`Құрылғы ${disconnectedDevice.name} ажыратылды.`);
+        
+        // Сипаттама объектісі қайта пайдаланылса, мәселелерді болдырмау үшін оқиға тыңдаушысын жою
+        if (gasCharacteristic) {
+             gasCharacteristic.removeEventListener('characteristicvaluechanged', handleGasData);
+        }
+
+        updateConnectionState(false);
+    }
+
+    // Оқиға Тыңдаушылары
+    connectButton.addEventListener('click', connectBLE);
+    
+    // График табтары үшін оқиға тыңдаушылары
+    tabAll.addEventListener('click', () => switchChartView('all'));
+    tabMq2.addEventListener('click', () => switchChartView('mq2'));
+    tabMq7.addEventListener('click', () => switchChartView('mq7'));
+    tabMq135.addEventListener('click', () => switchChartView('mq135'));
+    
+    // Экспорт және тазалау түймелері
+    exportButton.addEventListener('click', exportData);
+    clearButton.addEventListener('click', clearData);
+
+    // Бет жүктелген кезде Web Bluetooth API қолдауын тексеру
+    if ('bluetooth' in navigator) {
+        console.log('Web Bluetooth API қолдауы бар.');
+        // Графикті инициализациялау
+        initializeChart();
+        // ТҮЗЕТУ: SVG индикаторларының бос болуын болдырмау үшін бастапқы рендерлеу
+        ['mq2', 'mq7', 'mq135'].forEach(prefix => renderProgressIndicator(prefix, 0, 'text-green-500'));
+    } else {
+        console.error('Бұл браузерде Web Bluetooth API қолдауы ЖОҚ.');
+        document.getElementById('connect-button').disabled = true;
+        
+        // Үнемі бар болатын div немесе span қолдану
+        document.querySelector('.max-w-6xl').insertAdjacentHTML('afterbegin', '<div id="status-panel" class="p-4 rounded-lg bg-red-800/70 border border-red-500 mb-6"><p class="text-sm text-red-100 font-bold">Браузеріңіз Web Bluetooth-ты қолдамайды! Қосылу сәтсіз болады. Google Chrome (PC/Android) пайдаланыңыз.</p></div>');
+    }
+    </script>
+</body>
+</html>
